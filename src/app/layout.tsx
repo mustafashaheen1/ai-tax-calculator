@@ -3,7 +3,6 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import ClientBody from "./ClientBody";
 import Script from "next/script";
-import { AuthProvider } from "../contexts/AuthContext";
 import { Providers } from "../components/Providers";
 
 const inter = Inter({ subsets: ['latin'] });
@@ -27,11 +26,9 @@ export default function RootLayout({
         />
       </head>
       <body suppressHydrationWarning className="antialiased">
-        <AuthProvider>
-          <Providers>
-            <ClientBody>{children}</ClientBody>
-          </Providers>
-        </AuthProvider>
+        <Providers>
+          <ClientBody>{children}</ClientBody>
+        </Providers>
       </body>
     </html>
   );
