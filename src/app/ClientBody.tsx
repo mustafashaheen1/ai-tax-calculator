@@ -1,6 +1,6 @@
 'use client'
 
-import Providers from '../components/Providers'
+import { Providers } from '../components/Providers'
 
 interface ClientBodyProps {
   children: React.ReactNode
