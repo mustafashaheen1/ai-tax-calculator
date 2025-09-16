@@ -3,20 +3,15 @@
 import Image from 'next/image'
 import { useAuth } from '../contexts/AuthContext'
 
-interface LoginPageProps {
-  onLogin: (token: string) => void
-}
-
-export function LoginPage({ onLogin }: LoginPageProps) {
+export function LoginPage() {
   const { signInWithGoogle, loading, error } = useAuth()
 
   const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle()
-      // The auth state change will be handled by the AuthContext
-      // and the App component will automatically redirect to dashboard
+      // Auth state change is handled automatically by AuthContext
     } catch (error) {
-      // Error is already handled in AuthContext
+      // Error handling is managed by AuthContext
     }
   }
 
