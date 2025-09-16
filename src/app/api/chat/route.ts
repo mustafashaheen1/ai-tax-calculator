@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import prisma, { safeDbOperation } from '../../../lib/database';
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -20,57 +21,66 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user session
-
-    // Get or create chat session with safe database operation
-    let session = await safeDbOperation(async () => {
-      if (sessionId) {
-        return await prisma.chatSession.findUnique({
-          where: { id: sessionId },
-          include: { messages: { orderBy: { timestamp: 'asc' } } }
-        });
-      }
-      return null;
-    });
-
-    if (!session) {
-      session = await safeDbOperation(async () => {
-        return await prisma.chatSession.create({
-          data: {
-            
-          },
-          include: { messages: { orderBy: { timestamp: 'asc' } } }
-        });
-      });
-    }
-
-    if (!session) {
+    // Validate OpenAI API key
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('OpenAI API key is not configured');
       return NextResponse.json(
-        { error: 'Database connection failed. Please try again.' },
+        { error: 'OpenAI API key is not configured' },
         { status: 500 }
       );
     }
 
-    // Store user message with safe operation
-    await safeDbOperation(async () => {
-      return await prisma.chatMessage.create({
-        data: {
-          sessionId: session!.id,
-          role: 'user',
-          content: message,
-        }
+    // Get or create chat session with safe database operation
+    let session = null;
+    
+    if (sessionId) {
+      session = await safeDbOperation(async () => {
+        return await prisma.chatSession.findUnique({
+          where: { id: sessionId },
+          include: { messages: { orderBy: { timestamp: 'asc' } } }
+        });
       });
-    });
+    }
 
-    // Prepare message history for OpenAI
+    if (!session) {
+      session = await safeDbOperation(async () => {
+        return await prisma.chatSession.create({
+          data: {},
+          include: { messages: { orderBy: { timestamp: 'asc' } } }
+        });
+      });
+    }
+
+    // If database operations fail, continue without session persistence
     const messageHistory: ChatCompletionMessageParam[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...session.messages.map(msg => ({
-        role: msg.role as 'user' | 'assistant',
-        content: msg.content
-      })),
-      { role: 'user' as const, content: message }
+      { role: 'system', content: SYSTEM_PROMPT }
     ];
+
+    // Add previous messages if session exists
+    if (session?.messages) {
+      messageHistory.push(
+        ...session.messages.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        }))
+      );
+    }
+
+    // Add current user message
+    messageHistory.push({ role: 'user', content: message });
+
+    // Store user message if session exists
+    if (session) {
+      await safeDbOperation(async () => {
+        return await prisma.chatMessage.create({
+          data: {
+            sessionId: session!.id,
+            role: 'user',
+            content: message,
+          }
+        });
+      });
+    }
 
     // Get AI response
     const completion = await openai.chat.completions.create({
@@ -86,19 +96,22 @@ export async function POST(request: NextRequest) {
     const disclaimer = "This is educational information only. Consult a licensed tax professional for personalized advice.";
     const responseContent = aiResponse.includes(disclaimer) ? aiResponse : `${aiResponse}\n\n${disclaimer}`;
 
-    // Store AI response with safe operation
-    const assistantMessage = await safeDbOperation(async () => {
-      return await prisma.chatMessage.create({
-        data: {
-          sessionId: session!.id,
-          role: 'assistant',
-          content: responseContent,
-        }
+    // Store AI response if session exists
+    let assistantMessage = null;
+    if (session) {
+      assistantMessage = await safeDbOperation(async () => {
+        return await prisma.chatMessage.create({
+          data: {
+            sessionId: session!.id,
+            role: 'assistant',
+            content: responseContent,
+          }
+        });
       });
-    });
+    }
 
     return NextResponse.json({
-      sessionId: session.id,
+      sessionId: session?.id || Date.now().toString(),
       message: {
         id: assistantMessage?.id || Date.now().toString(),
         role: 'assistant',
@@ -109,6 +122,23 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Chat API error:', error);
+    
+    // Provide more specific error information
+    if (error instanceof Error) {
+      if (error.message.includes('API key')) {
+        return NextResponse.json(
+          { error: 'OpenAI API key is invalid or missing' },
+          { status: 500 }
+        );
+      }
+      if (error.message.includes('quota')) {
+        return NextResponse.json(
+          { error: 'OpenAI API quota exceeded' },
+          { status: 429 }
+        );
+      }
+    }
+
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
