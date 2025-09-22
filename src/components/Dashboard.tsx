@@ -1,56 +1,44 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Header } from './Header'
 import { TaxCalculatorPanel } from './TaxCalculatorPanel'
 import { ChatInterface } from './ChatInterface'
-import WelcomeVideoModal from './WelcomeVideoModal'
 
 export function Dashboard() {
-  const [calculationResult, setCalculationResult] = useState(null)
-  const [calculatorInputs, setCalculatorInputs] = useState({
-    annualIncome: '',
-    currentTaxRate: '',
-    donationAmount: '',
-    filingStatus: 'single'
-  })
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const chatRef = useRef<{ addCalculationResult: (type: string, result: Record<string, unknown>) => void }>(null)
 
-  const handleCalculation = (result: any) => {
-    setCalculationResult(result)
-  }
+  useEffect(() => {
+    // Generate a session ID for this session
+    setSessionId(Date.now().toString())
+  }, [])
 
-  const handleInputsChange = (inputs: any) => {
-    setCalculatorInputs(inputs)
-  }
+  const handleCalculation = (type: string, result: Record<string, unknown>) => {
+    console.log('Calculation completed:', { type, result })
 
-  const handleSendMessage = (message: string) => {
-    // Trigger the external message function if available
-    if (typeof window !== 'undefined' && window.sendChatMessage) {
-      window.sendChatMessage(message)
+    // Send calculation results to chat interface
+    if (chatRef.current) {
+      chatRef.current.addCalculationResult(type, result)
     }
+  }
+
+  const handleMessageSent = (message: string) => {
+    console.log('Message sent:', message)
   }
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
-      <WelcomeVideoModal />
       <Header />
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Tax Calculator */}
         <div className="w-1/2 border-r border-gray-200">
-          <TaxCalculatorPanel 
-            onCalculation={handleCalculation} 
-            onInputsChange={handleInputsChange}
-            onSendMessage={handleSendMessage}
-          />
+          <TaxCalculatorPanel onCalculation={handleCalculation} />
         </div>
 
         {/* Right Panel - Chat Interface */}
         <div className="w-1/2">
-          <ChatInterface 
-            calculationResult={calculationResult}
-            calculatorInputs={calculatorInputs}
-            onReceiveMessage={handleSendMessage}
-          />
+          <ChatInterface ref={chatRef} onMessageSent={handleMessageSent} />
         </div>
       </div>
     </div>

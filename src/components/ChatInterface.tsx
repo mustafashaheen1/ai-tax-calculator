@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { Send, MessageCircle, RotateCcw } from 'lucide-react'
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
+import { Send } from 'lucide-react'
 
 interface Message {
   id: string
@@ -11,12 +11,14 @@ interface Message {
 }
 
 interface ChatInterfaceProps {
-  calculationResult?: any
-  calculatorInputs?: any
-  onReceiveMessage?: (message: string) => void
+  onMessageSent?: (message: string) => void
 }
 
-export function ChatInterface({ calculationResult, calculatorInputs, onReceiveMessage }: ChatInterfaceProps) {
+interface ChatInterfaceRef {
+  addCalculationResult: (type: string, result: Record<string, unknown>) => void
+}
+
+export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(({ onMessageSent }, ref) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -28,81 +30,8 @@ export function ChatInterface({ calculationResult, calculatorInputs, onReceiveMe
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Function to format messages and replace disclaimer with booking link
-  const formatMessage = (message: string) => {
-    const lowerMessage = message.toLowerCase();
-    
-    // EXCLUDE welcome/intro messages
-    if (lowerMessage.includes("i'm your ai") || 
-        lowerMessage.includes("i am your ai") ||
-        lowerMessage.includes("hello! i'm") ||
-        lowerMessage.includes("hi! i'm") ||
-        (lowerMessage.includes("how can i assist you") && lowerMessage.length < 150)) {
-      return message;
-    }
-    
-    // Check for ANY mention of consulting/discussing with professionals
-    const hasProfessionalMention = 
-      // Direct mentions of consulting
-      lowerMessage.includes('consult with a tax professional') ||
-      lowerMessage.includes('consult with a professional') ||
-      lowerMessage.includes('consult a tax professional') ||
-      lowerMessage.includes('consulting a professional') ||
-      lowerMessage.includes('should always consult') ||
-      lowerMessage.includes('always consult with') ||
-      // Mentions of financial/tax advisors
-      lowerMessage.includes('financial advisor') ||
-      lowerMessage.includes('tax advisor') ||
-      lowerMessage.includes('tax professional') ||
-      // Discussion mentions
-      lowerMessage.includes('discuss it with a financial') ||
-      lowerMessage.includes('discuss with a professional') ||
-      lowerMessage.includes('speak with a professional') ||
-      // Recommendations
-      lowerMessage.includes('advisable to consult') ||
-      lowerMessage.includes('recommend consulting') ||
-      lowerMessage.includes('would recommend consulting') ||
-      // Finding professionals
-      lowerMessage.includes('finding a financial advisor') ||
-      lowerMessage.includes('find a professional') ||
-      lowerMessage.includes('reach a financial advisor') ||
-      // General patterns
-      (lowerMessage.includes('consult') && lowerMessage.includes('professional')) ||
-      (lowerMessage.includes('discuss') && lowerMessage.includes('advisor')) ||
-      (lowerMessage.includes('speak') && lowerMessage.includes('professional'));
-    
-    if (hasProfessionalMention) {
-      // Remove existing disclaimer/consultation sentences
-      let cleanedMessage = message
-        // Remove sentences that recommend consulting
-        .replace(/[^.!?]*(?:you should always|always|should)\s+consult[^.!?]*professional[^.!?]*[.!?]/gi, '')
-        .replace(/[^.!?]*(?:important to|advisable to|recommend)\s+(?:consult|discuss)[^.!?]*(?:professional|advisor)[^.!?]*[.!?]/gi, '')
-        .replace(/[^.!?]*discuss it with[^.!?]*advisor[^.!?]*[.!?]/gi, '')
-        // Remove generic disclaimers
-        .replace(/[^.!?]*(?:Please note)[^.!?]*(?:financial decisions)[^.!?]*[.!?]/gi, '')
-        .replace(/[^.!?]*(?:This information should not)[^.!?]*[.!?]/gi, '')
-        .replace(/[^.!?]*(?:Always do your own research)[^.!?]*[.!?]/gi, '')
-        // Remove any existing booking links
-        .replace(/To consult.*?<\/a>.*?with us\./gi, '')
-        // Clean up
-        .replace(/\s+/g, ' ')
-        .replace(/\.+/g, '.')
-        .trim();
-      
-      // Ensure proper ending
-      if (!cleanedMessage.endsWith('.') && !cleanedMessage.endsWith('!') && !cleanedMessage.endsWith('?')) {
-        cleanedMessage += '.';
-      }
-      
-      // Add single booking link at the end
-      cleanedMessage += ' To consult with our tax professionals, <a href="https://aitaxcalculator.hybridfoundation.org/68c370a4844cc2003c2092e0/page_yyrxpw/" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline hover:text-blue-800 font-medium">click here</a> to book a call with us.';
-      
-      return cleanedMessage;
-    }
-    
-    return message;
-  }
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
@@ -111,153 +40,77 @@ export function ChatInterface({ calculationResult, calculatorInputs, onReceiveMe
     scrollToBottom()
   }, [messages])
 
-  // Handle external messages (from other components)
-  useEffect(() => {
-    if (onReceiveMessage) {
-      // This creates a function that can be called to send messages
-      const sendExternalMessage = (message: string) => {
-        const userMessage: Message = {
-          id: Date.now().toString(),
-          role: 'user',
-          content: message,
-          timestamp: new Date()
-        }
-        setMessages(prev => [...prev, userMessage])
-        
-        // Process the message through AI
-        handleAIResponse([...messages, userMessage])
+  const formatCalculationResult = (type: string, result: Record<string, unknown>) => {
+    if (type === 'estimate_savings') {
+      const data = result as {
+        donationAmount?: number
+        estimatedTaxSavings?: number
+        effectiveDeductionRate?: number
+        netCostOfDonation?: number
+        marginalTaxRate?: number
+        recommendation?: string
       }
-      
-      // Store the function reference for external use
-      window.sendChatMessage = sendExternalMessage
-    }
-  }, [messages, onReceiveMessage])
 
-  const resetConversation = () => {
-    setMessages([
-      {
-        id: '1',
-        role: 'assistant',
-        content: 'Hello! I\'m your AI tax advisor. I can help you understand tax implications, donation strategies, and answer any questions about tax planning. How can I assist you today?',
-        timestamp: new Date()
+      return `## Tax Savings Calculation Results
+
+**Donation Amount:** $${data.donationAmount?.toLocaleString() || 'N/A'}
+**Estimated Tax Savings:** $${data.estimatedTaxSavings?.toLocaleString() || 'N/A'}
+**Effective Deduction Rate:** ${data.effectiveDeductionRate || 'N/A'}%
+**Net Cost of Donation:** $${data.netCostOfDonation?.toLocaleString() || 'N/A'}
+**Your Marginal Tax Rate:** ${data.marginalTaxRate || 'N/A'}%
+
+**Analysis:** ${data.recommendation || 'No recommendation available.'}
+
+*This is an estimate for planning purposes. Please consult with a qualified tax professional before making any financial decisions.*`
+
+    } else if (type === 'evaluate_donation') {
+      const data = result as {
+        targetTaxSavings?: number
+        recommendedDonationAmount?: number
+        projectedTaxSavings?: number
+        netCostToYou?: number
+        currentTaxLiability?: number
+        newTaxLiability?: number
+        recommendation?: string
       }
-    ])
+
+      return `## Donation Amount Evaluation Results
+
+**Target Tax Savings:** $${data.targetTaxSavings?.toLocaleString() || 'N/A'}
+**Recommended Donation Amount:** $${data.recommendedDonationAmount?.toLocaleString() || 'N/A'}
+**Projected Tax Savings:** $${data.projectedTaxSavings?.toLocaleString() || 'N/A'}
+**Net Cost to You:** $${data.netCostToYou?.toLocaleString() || 'N/A'}
+
+**Tax Liability Comparison:**
+- Current: $${data.currentTaxLiability?.toLocaleString() || 'N/A'}
+- With Donation: $${data.newTaxLiability?.toLocaleString() || 'N/A'}
+
+**Analysis:** ${data.recommendation || 'No recommendation available.'}
+
+*This is an estimate for planning purposes. Please consult with a qualified tax professional before making any financial decisions.*`
+    }
+
+    return `Calculation completed for ${type}: ${JSON.stringify(result, null, 2)}`
   }
 
-  const handleAIResponse = async (conversationHistory: Message[]) => {
-    setIsLoading(true)
-
-    try {
-      // Prepare conversation history for the API
-      const historyForAPI = conversationHistory.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }))
-
-      // Prepare calculator context
-      const calculatorContext = {
-        inputs: calculatorInputs,
-        result: calculationResult
-      }
-
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          conversationHistory: historyForAPI,
-          calculatorContext,
-        }),
-      })
-
-      const data = await response.json()
-
-      let messageContent = 'I apologize, but I encountered an error processing your request.';
-      
-      if (data.message) {
-        messageContent = data.message;
-      } else if (data.error) {
-        messageContent = data.error;
-      } else if (!response.ok) {
-        // Handle HTTP error responses
-        if (response.status === 401) {
-          messageContent = 'Authentication failed. Please refresh the page and try again.';
-        } else if (response.status === 429) {
-          messageContent = 'Too many requests. Please wait a moment before trying again.';
-        } else if (response.status === 503) {
-          messageContent = 'Service temporarily unavailable. Please try again in a few moments.';
-        } else {
-          messageContent = `Service error (${response.status}). Please try again.`;
-        }
-      }
-
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
+  useImperativeHandle(ref, () => ({
+    addCalculationResult: (type: string, result: Record<string, unknown>) => {
+      const calculationMessage: Message = {
+        id: Date.now().toString(),
         role: 'assistant',
-        content: messageContent,
+        content: formatCalculationResult(type, result),
         timestamp: new Date()
       }
-      setMessages(prev => [...prev, aiMessage])
-    } catch (error) {
-      console.error('Chat error:', error)
-      
-      let errorMessage = 'I apologize, but I encountered an error. Please try again.';
-      
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        errorMessage = 'Network connection error. Please check your internet connection and try again.';
-      } else if (error instanceof Error) {
-        console.error('Detailed error:', error.message);
-        errorMessage = 'Unable to process your request. Please try again or refresh the page.';
-      }
-      
-      const assistantErrorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: errorMessage,
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, assistantErrorMessage])
-    } finally {
-      setIsLoading(false)
+
+      setMessages(prev => [...prev, calculationMessage])
     }
-  }
+  }))
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!inputMessage.trim() || isLoading) return
 
-    const lowerMessage = inputMessage.toLowerCase();
-    
-    // Check if user is asking about consulting a professional
-    if (lowerMessage.includes('talk to a professional') || 
-        lowerMessage.includes('consult a professional') ||
-        lowerMessage.includes('recommend a tax professional') ||
-        lowerMessage.includes('find a tax professional')) {
-      
-      // Provide direct response with booking link
-      const directResponse = 'To consult with our tax professionals, <a href="https://aitaxcalculator.hybridfoundation.org/68c370a4844cc2003c2092e0/page_yyrxpw/" target="_blank" rel="noopener noreferrer" class="text-black underline hover:text-gray-800 font-medium">click here</a> to book a call with us. Our team can provide personalized advice tailored to your specific tax situation.';
-      
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        role: 'user',
-        content: inputMessage.trim(),
-        timestamp: new Date()
-      }
-      
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: directResponse,
-        timestamp: new Date()
-      }
-      
-      // Add both messages
-      setMessages(prev => [...prev, userMessage, assistantMessage]);
-      setInputMessage('');
-      return;
-    }
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -267,82 +120,61 @@ export function ChatInterface({ calculationResult, calculatorInputs, onReceiveMe
 
     setMessages(prev => [...prev, userMessage])
     setInputMessage('')
-    
-    // Process through AI
-    await handleAIResponse([...messages, userMessage])
+    setIsLoading(true)
+
+    if (onMessageSent) {
+      onMessageSent(inputMessage.trim())
+    }
+
+    // Simulate AI response
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userMessage.content,
+          sessionId: Date.now().toString()
+        }),
+      })
+
+      const data = await response.json()
+
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: data.message?.content || 'I apologize, but I encountered an error processing your request.',
+        timestamp: new Date()
+      }
+
+      setMessages(prev => [...prev, aiMessage])
+    } catch (error) {
+      console.error('Chat error:', error)
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'I apologize, but I encountered an error. Please try again.',
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorMessage])
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
     <div className="bg-white h-full flex flex-col">
-      {/* Header */}
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <MessageCircle className="w-5 h-5 text-black" />
-            <h2 className="text-lg font-semibold text-black">AI Tax Advisor</h2>
-          </div>
-          <button
-            onClick={resetConversation}
-            className="flex items-center space-x-1 text-sm text-gray-500 hover:text-gray-700 border border-gray-300 px-3 py-1 rounded transition-colors"
-          >
-            <RotateCcw className="w-4 h-4" />
-            <span>New Conversation</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 3D AI Avatar */}
-      <div className="flex justify-center items-center py-6 bg-gradient-to-b from-gray-50 to-white">
-        <div className="relative flex flex-col items-center">
-          {/* Main Avatar Container */}
-          <div className="w-24 h-24 relative transform-gpu perspective-1000">
-            {/* Avatar Base */}
-            <div className="w-full h-full rounded-full bg-gradient-to-br from-gray-900 via-black to-gray-800 shadow-2xl transform rotate-y-12 animate-float relative overflow-hidden">
-              {/* Inner Glow */}
-              <div className="absolute inset-2 rounded-full bg-gradient-to-br from-gray-600 to-gray-700 opacity-60 animate-pulse"></div>
-              
-              {/* AI Brain Pattern */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-16 h-16 relative">
-                  {/* Neural Network Lines */}
-                  <div className="absolute inset-0">
-                    <div className="absolute top-2 left-2 w-2 h-2 bg-white rounded-full opacity-80 animate-ping"></div>
-                    <div className="absolute top-4 right-3 w-1.5 h-1.5 bg-white rounded-full opacity-60 animate-ping" style={{animationDelay: '0.5s'}}></div>
-                    <div className="absolute bottom-3 left-4 w-1.5 h-1.5 bg-white rounded-full opacity-70 animate-ping" style={{animationDelay: '1s'}}></div>
-                    <div className="absolute bottom-2 right-2 w-2 h-2 bg-white rounded-full opacity-80 animate-ping" style={{animationDelay: '1.5s'}}></div>
-                    
-                    {/* Connecting Lines */}
-                    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 64 64">
-                      <path d="M12 12 L52 20 M20 52 L44 16 M16 32 L48 48" stroke="white" strokeWidth="1" opacity="0.3" className="animate-pulse"/>
-                    </svg>
-                  </div>
-                  
-                  {/* Central Calculator Icon */}
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-8 h-8 bg-white bg-opacity-90 rounded-md flex items-center justify-center shadow-lg">
-                      <div className="text-xs font-bold text-gray-800">$</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Reflection */}
-              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-white to-transparent opacity-20"></div>
-            </div>
-            
-            {/* Floating Particles */}
-            <div className="absolute -top-2 -left-2 w-2 h-2 bg-gray-400 rounded-full opacity-60 animate-bounce" style={{animationDelay: '0s'}}></div>
-            <div className="absolute -top-1 -right-3 w-1.5 h-1.5 bg-gray-500 rounded-full opacity-50 animate-bounce" style={{animationDelay: '0.7s'}}></div>
-            <div className="absolute -bottom-2 -right-1 w-2 h-2 bg-gray-600 rounded-full opacity-60 animate-bounce" style={{animationDelay: '1.4s'}}></div>
-            <div className="absolute -bottom-1 -left-3 w-1.5 h-1.5 bg-gray-400 rounded-full opacity-50 animate-bounce" style={{animationDelay: '2.1s'}}></div>
-          </div>
-          
-          {/* Avatar Name */}
-          <div className="text-center mt-3">
-            <p className="text-sm font-semibold text-gray-800">TaxBot AI</p>
-            <p className="text-xs text-gray-500">Your Tax Strategy Assistant</p>
+      {/* 3D Avatar Section */}
+      <div className="bg-gray-50 p-4 border-b border-gray-200">
+        <div className="flex items-center justify-center">
+          <div className="w-20 h-20 bg-gradient-to-br from-gray-300 to-gray-500 rounded-full flex items-center justify-center text-white font-bold text-lg animate-pulse">
+            AI
           </div>
         </div>
+        <p className="text-center text-sm text-gray-600 mt-2">
+          AI Tax Advisor
+        </p>
       </div>
 
       {/* Chat Messages */}
@@ -360,11 +192,27 @@ export function ChatInterface({ calculationResult, calculatorInputs, onReceiveMe
               }`}
             >
               <div className="text-sm">
-                <div 
-                  dangerouslySetInnerHTML={{ 
-                    __html: formatMessage(message.content) 
-                  }}
-                />
+                {message.content.includes('##') ? (
+                  <div className="space-y-2">
+                    {message.content.split('\n').map((line, index) => {
+                      if (line.startsWith('## ')) {
+                        return <h3 key={index} className="font-bold text-lg text-gray-900">{line.replace('## ', '')}</h3>
+                      } else if (line.startsWith('**') && line.endsWith('**')) {
+                        return <p key={index} className="font-semibold">{line.replace(/\*\*/g, '')}</p>
+                      } else if (line.startsWith('*') && line.endsWith('*')) {
+                        return <p key={index} className="italic text-gray-600 text-xs">{line.replace(/\*/g, '')}</p>
+                      } else if (line.startsWith('- ')) {
+                        return <p key={index} className="ml-4">{line}</p>
+                      } else if (line.trim() === '') {
+                        return <div key={index} className="h-2"></div>
+                      } else {
+                        return <p key={index}>{line}</p>
+                      }
+                    })}
+                  </div>
+                ) : (
+                  <p>{message.content}</p>
+                )}
               </div>
               <p className={`text-xs mt-1 ${
                 message.role === 'user' ? 'text-gray-300' : 'text-gray-500'
@@ -397,6 +245,7 @@ export function ChatInterface({ calculationResult, calculatorInputs, onReceiveMe
       <div className="border-t border-gray-200 p-4">
         <form onSubmit={handleSendMessage} className="flex space-x-2">
           <input
+            ref={inputRef}
             type="text"
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
@@ -407,7 +256,7 @@ export function ChatInterface({ calculationResult, calculatorInputs, onReceiveMe
           <button
             type="submit"
             disabled={isLoading || !inputMessage.trim()}
-            className="bg-black text-white p-2 rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="bg-black text-white p-2 rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-black focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Send size={20} />
           </button>
@@ -415,4 +264,6 @@ export function ChatInterface({ calculationResult, calculatorInputs, onReceiveMe
       </div>
     </div>
   )
-}
+})
+
+ChatInterface.displayName = 'ChatInterface'

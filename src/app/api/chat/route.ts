@@ -1,30 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI, { APIConnectionError } from 'openai';
+import OpenAI from 'openai';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import prisma, { safeDbOperation } from '../../../lib/database';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const SYSTEM_PROMPT = `You are an AI tax strategy advisor for a tax calculator application. 
+const SYSTEM_PROMPT = `You are an AI tax strategy advisor for Hybrid Advisors Foundation. Provide accurate, helpful information about tax planning, charitable giving, and investment strategies. Always end with: "This is educational information only. Consult a licensed tax professional for personalized advice."`;
 
-IMPORTANT INSTRUCTIONS:
-1. Always use the user's actual input values from the calculator when providing examples and calculations
-2. If the user has entered specific values (income, tax rate, donation amount, filing status), reference these exact numbers in your responses
-3. If calculation results are available, use those exact figures rather than doing your own calculations
-4. Remember previous parts of the conversation and build upon them - don't start fresh each time
-5. If the user mentions specific numbers (like "my tax bracket is 35%"), remember and use those numbers in all subsequent responses
-6. Be consistent with calculations and references throughout the conversation
-7. When calculator inputs or results are provided, prioritize using those over generic examples
-
-Provide accurate, helpful information about tax planning, charitable giving, and investment strategies. Only include educational disclaimers when providing specific tax or financial advice that could impact someone's financial decisions.`;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { conversationHistory, calculatorContext } = body;
+    const { message, sessionId } = body;
 
-    if (!conversationHistory || !Array.isArray(conversationHistory)) {
+    if (!message || typeof message !== 'string') {
       return NextResponse.json(
-        { error: 'Conversation history is required' },
+        { error: 'Message is required' },
         { status: 400 }
       );
     }
@@ -38,98 +30,118 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Additional validation for API key format
-    if (!process.env.OPENAI_API_KEY.startsWith('sk-')) {
-      console.error('OpenAI API key appears to be invalid format');
-      return NextResponse.json(
-        { error: 'OpenAI API key is invalid format' },
-        { status: 500 }
+    // Get or create chat session with safe database operation
+    let session = null;
+    
+    if (sessionId) {
+      session = await safeDbOperation(async () => {
+        return await prisma.chatSession.findUnique({
+          where: { id: sessionId },
+          include: { messages: { orderBy: { timestamp: 'asc' } } }
+        });
+      });
+    }
+
+    if (!session) {
+      session = await safeDbOperation(async () => {
+        return await prisma.chatSession.create({
+          data: {},
+          include: { messages: { orderBy: { timestamp: 'asc' } } }
+        });
+      });
+    }
+
+    // If database operations fail, continue without session persistence
+    const messageHistory: ChatCompletionMessageParam[] = [
+      { role: 'system', content: SYSTEM_PROMPT }
+    ];
+
+    // Add previous messages if session exists
+    if (session?.messages) {
+      messageHistory.push(
+        ...session.messages.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        }))
       );
     }
 
-    // Prepare messages for OpenAI
-    const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
+    // Add current user message
+    messageHistory.push({ role: 'user', content: message });
 
-    // Add calculator context if available
-    if (calculatorContext && (calculatorContext.inputs || calculatorContext.result)) {
-      let contextMessage = "Current calculator context:\n";
-      
-      if (calculatorContext.inputs) {
-        const inputs = calculatorContext.inputs;
-        contextMessage += `- Annual Income: ${inputs.annualIncome ? '$' + parseFloat(inputs.annualIncome).toLocaleString() : 'Not entered'}\n`;
-        contextMessage += `- Filing Status: ${inputs.filingStatus || 'Not selected'}\n`;
-        contextMessage += `- Tax Rate: ${inputs.currentTaxRate ? inputs.currentTaxRate + '%' : 'Not entered'}\n`;
-        contextMessage += `- Donation Amount: ${inputs.donationAmount ? '$' + parseFloat(inputs.donationAmount).toLocaleString() : 'Not entered'}\n`;
-      }
-      
-      if (calculatorContext.result) {
-        const result = calculatorContext.result;
-        contextMessage += `\nCalculation Results:\n`;
-        contextMessage += `- Estimated Tax Savings: $${result.estimatedTaxSavings?.toLocaleString() || 'N/A'}\n`;
-        contextMessage += `- Net Cost of Donation: $${result.netCostOfDonation?.toLocaleString() || 'N/A'}\n`;
-        contextMessage += `- Effective Deduction Rate: ${result.effectiveDeductionRate || 'N/A'}%\n`;
-      }
-      
-      contextMessage += "\nUse these exact values when answering questions. Don't recalculate - use the provided results.";
-      
-      messages.push({ role: 'system', content: contextMessage });
+    // Store user message if session exists
+    if (session) {
+      await safeDbOperation(async () => {
+        return await prisma.chatMessage.create({
+          data: {
+            sessionId: session!.id,
+            role: 'user',
+            content: message,
+          }
+        });
+      });
     }
 
-    // Add conversation history
-    conversationHistory.forEach((msg: any) => {
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        messages.push({
-          role: msg.role,
-          content: msg.content
-        });
-      }
-    });
     // Get AI response
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages: messages as any,
+      messages: messageHistory,
       max_tokens: 1000,
       temperature: 0.7
     });
 
     const aiResponse = completion.choices[0]?.message?.content || 'I apologize, but I could not generate a response.';
 
+    // Add disclaimer if not present
+    const disclaimer = "This is educational information only. Consult a licensed tax professional for personalized advice.";
+    const responseContent = aiResponse.includes(disclaimer) ? aiResponse : `${aiResponse}\n\n${disclaimer}`;
+
+    // Store AI response if session exists
+    let assistantMessage = null;
+    if (session) {
+      assistantMessage = await safeDbOperation(async () => {
+        return await prisma.chatMessage.create({
+          data: {
+            sessionId: session!.id,
+            role: 'assistant',
+            content: responseContent,
+          }
+        });
+      });
+    }
+
     return NextResponse.json({
-      message: aiResponse
+      sessionId: session?.id || Date.now().toString(),
+      message: {
+        id: assistantMessage?.id || Date.now().toString(),
+        role: 'assistant',
+        content: responseContent,
+        timestamp: assistantMessage?.timestamp || new Date(),
+      }
     });
 
   } catch (error) {
     console.error('Chat API error:', error);
     
-    // Handle different types of errors with specific messages
-    let errorMessage = 'I apologize, but I encountered an error. Please try again.';
-    let statusCode = 500;
-
-    if (error instanceof APIConnectionError) {
-      errorMessage = 'Unable to connect to AI service. Please check your connection and try again.';
-      statusCode = 503;
-    } else if (error instanceof Error) {
-      // Check for specific error patterns
-      const errorMsg = error.message.toLowerCase();
-      
-      if (errorMsg.includes('api key') || errorMsg.includes('unauthorized')) {
-        errorMessage = 'AI service authentication failed. Please contact support.';
-        statusCode = 401;
-      } else if (errorMsg.includes('quota') || errorMsg.includes('rate limit')) {
-        errorMessage = 'AI service is temporarily unavailable due to high demand. Please try again in a moment.';
-        statusCode = 429;
-      } else if (errorMsg.includes('timeout')) {
-        errorMessage = 'Request timed out. Please try asking a shorter question.';
-        statusCode = 408;
-      } else if (errorMsg.includes('model') || errorMsg.includes('invalid')) {
-        errorMessage = 'There was an issue processing your request. Please try rephrasing your question.';
-        statusCode = 400;
+    // Provide more specific error information
+    if (error instanceof Error) {
+      if (error.message.includes('API key')) {
+        return NextResponse.json(
+          { error: 'OpenAI API key is invalid or missing' },
+          { status: 500 }
+        );
+      }
+      if (error.message.includes('quota')) {
+        return NextResponse.json(
+          { error: 'OpenAI API quota exceeded' },
+          { status: 429 }
+        );
       }
     }
 
     return NextResponse.json(
-      { message: errorMessage },
-      { status: statusCode }
+      { error: 'Internal server error' },
+      { status: 500 }
     );
   }
 }
