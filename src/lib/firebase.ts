@@ -21,8 +21,8 @@ let auth: any = null;
 let googleProvider: any = null;
 let db: any = null;
 
-// Only initialize Firebase if we have valid configuration
-if (process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
+// Initialize Firebase with demo configuration if no API key is provided
+if (firebaseConfig.apiKey) {
   try {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
