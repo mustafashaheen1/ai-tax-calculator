@@ -259,3 +259,5 @@ export function TaxCalculatorPanel({ onCalculation }: TaxCalculatorPanelProps) {
       </Tabs.Root>
     </div>
   )
+
+}
