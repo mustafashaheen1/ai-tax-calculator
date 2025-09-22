@@ -1,1 +1,6 @@
-{}
+{
+  "components/EmailAuthFlow.tsx -> firebase/auth": {
+    "id": "components/EmailAuthFlow.tsx -> firebase/auth",
+    "files": []
+  }
+}
