@@ -1,44 +1,56 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { Header } from './Header'
 import { TaxCalculatorPanel } from './TaxCalculatorPanel'
 import { ChatInterface } from './ChatInterface'
+import WelcomeVideoModal from './WelcomeVideoModal'
 
 export function Dashboard() {
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const chatRef = useRef<{ addCalculationResult: (type: string, result: Record<string, unknown>) => void }>(null)
+  const [calculationResult, setCalculationResult] = useState(null)
+  const [calculatorInputs, setCalculatorInputs] = useState({
+    annualIncome: '',
+    currentTaxRate: '',
+    donationAmount: '',
+    filingStatus: 'single'
+  })
 
-  useEffect(() => {
-    // Generate a session ID for this session
-    setSessionId(Date.now().toString())
-  }, [])
-
-  const handleCalculation = (type: string, result: Record<string, unknown>) => {
-    console.log('Calculation completed:', { type, result })
-
-    // Send calculation results to chat interface
-    if (chatRef.current) {
-      chatRef.current.addCalculationResult(type, result)
-    }
+  const handleCalculation = (result: any) => {
+    setCalculationResult(result)
   }
 
-  const handleMessageSent = (message: string) => {
-    console.log('Message sent:', message)
+  const handleInputsChange = (inputs: any) => {
+    setCalculatorInputs(inputs)
+  }
+
+  const handleSendMessage = (message: string) => {
+    // Trigger the external message function if available
+    if (typeof window !== 'undefined' && window.sendChatMessage) {
+      window.sendChatMessage(message)
+    }
   }
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
+      <WelcomeVideoModal />
       <Header />
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Tax Calculator */}
         <div className="w-1/2 border-r border-gray-200">
-          <TaxCalculatorPanel onCalculation={handleCalculation} />
+          <TaxCalculatorPanel 
+            onCalculation={handleCalculation} 
+            onInputsChange={handleInputsChange}
+            onSendMessage={handleSendMessage}
+          />
         </div>
 
         {/* Right Panel - Chat Interface */}
         <div className="w-1/2">
-          <ChatInterface ref={chatRef} onMessageSent={handleMessageSent} />
+          <ChatInterface 
+            calculationResult={calculationResult}
+            calculatorInputs={calculatorInputs}
+            onReceiveMessage={handleSendMessage}
+          />
         </div>
       </div>
     </div>

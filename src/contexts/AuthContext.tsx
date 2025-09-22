@@ -1,86 +1,56 @@
-'use client';
+'use client'
+import { createContext, useContext, useEffect, useState } from 'react'
+import { onAuthStateChanged, signOut, User } from 'firebase/auth'
+import { collection, query, where, getDocs } from 'firebase/firestore'
+import { auth, db } from '../lib/firebase'
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase';
+const AuthContext = createContext({})
+export const useAuth = () => useContext(AuthContext)
 
-interface AuthContextType {
-  user: User | null;
-  loading: boolean;
-  error: string | null;
-  signInWithGoogle: () => Promise<void>;
-  logout: () => Promise<void>;
-}
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const checkEmailWhitelist = async (email) => {
+    try {
+      const emailsRef = collection(db, 'zapier-emails')
+      const q = query(emailsRef, where('email', '==', email.toLowerCase()))
+      const querySnapshot = await getDocs(q)
+      return !querySnapshot.empty
+    } catch (error) {
+      console.error('Error checking email whitelist:', error)
+      return false
+    }
+  }
 
   useEffect(() => {
-    if (auth) {
-      const unsubscribe = onAuthStateChanged(auth, (user) => {
-        setUser(user);
-        setLoading(false);
-      });
-
-      return unsubscribe;
-    } else {
-      setLoading(false);
-      setError('Firebase authentication is not configured. Please check your environment variables.');
-    }
-  }, []);
-
-  const signInWithGoogle = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error: any) {
-      console.error('Authentication error:', error);
-      
-      if (error.code === 'auth/popup-blocked') {
-        setError('Popup blocked. Please allow popups and try again.');
-      } else if (error.code === 'auth/popup-closed-by-user') {
-        setError('Sign-in cancelled. Please try again.');
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // Verify email is still in whitelist
+        const isWhitelisted = await checkEmailWhitelist(user.email)
+        if (!isWhitelisted) {
+          await signOut(auth)
+          setUser(null)
+          setError('Your access has been revoked. Please contact support.')
+        } else {
+          setUser(user)
+          setError(null)
+        }
       } else {
-        setError('Failed to sign in. Please try again.');
+        setUser(null)
+        setError(null)
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+      setLoading(false)
+    })
+    return unsubscribe
+  }, [])
 
-  const logout = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      await signOut(auth);
-    } catch (error: any) {
-      console.error('Logout error:', error);
-      setError('Failed to sign out. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const value = { user, loading, error, signInWithGoogle, logout };
+  const logout = () => signOut(auth)
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{ user, loading, error, logout }}>
       {children}
     </AuthContext.Provider>
-  );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+  )
 }
