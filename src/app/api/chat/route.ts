@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import prisma, { safeDbOperation } from '../../../lib/database';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -30,57 +29,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get or create chat session with safe database operation
-    let session = null;
-    
-    if (sessionId) {
-      session = await safeDbOperation(async () => {
-        return await prisma.chatSession.findUnique({
-          where: { id: sessionId },
-          include: { messages: { orderBy: { timestamp: 'asc' } } }
-        });
-      });
-    }
-
-    if (!session) {
-      session = await safeDbOperation(async () => {
-        return await prisma.chatSession.create({
-          data: {},
-          include: { messages: { orderBy: { timestamp: 'asc' } } }
-        });
-      });
-    }
-
-    // If database operations fail, continue without session persistence
+    // Simple message history without database persistence
     const messageHistory: ChatCompletionMessageParam[] = [
       { role: 'system', content: SYSTEM_PROMPT }
     ];
 
-    // Add previous messages if session exists
-    if (session?.messages) {
-      messageHistory.push(
-        ...session.messages.map(msg => ({
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content
-        }))
-      );
-    }
-
     // Add current user message
     messageHistory.push({ role: 'user', content: message });
-
-    // Store user message if session exists
-    if (session) {
-      await safeDbOperation(async () => {
-        return await prisma.chatMessage.create({
-          data: {
-            sessionId: session!.id,
-            role: 'user',
-            content: message,
-          }
-        });
-      });
-    }
 
     // Get AI response
     const completion = await openai.chat.completions.create({
@@ -96,27 +51,13 @@ export async function POST(request: NextRequest) {
     const disclaimer = "This is educational information only. Consult a licensed tax professional for personalized advice.";
     const responseContent = aiResponse.includes(disclaimer) ? aiResponse : `${aiResponse}\n\n${disclaimer}`;
 
-    // Store AI response if session exists
-    let assistantMessage = null;
-    if (session) {
-      assistantMessage = await safeDbOperation(async () => {
-        return await prisma.chatMessage.create({
-          data: {
-            sessionId: session!.id,
-            role: 'assistant',
-            content: responseContent,
-          }
-        });
-      });
-    }
-
     return NextResponse.json({
-      sessionId: session?.id || Date.now().toString(),
+      sessionId: sessionId || Date.now().toString(),
       message: {
-        id: assistantMessage?.id || Date.now().toString(),
+        id: Date.now().toString(),
         role: 'assistant',
         content: responseContent,
-        timestamp: assistantMessage?.timestamp || new Date(),
+        timestamp: new Date(),
       }
     });
 

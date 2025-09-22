@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import prisma, { safeDbOperation } from '../../../lib/database'
 
 // Tax brackets for 2024 (simplified)
 const TAX_BRACKETS = {
