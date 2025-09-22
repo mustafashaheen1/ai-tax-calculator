@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { User, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth'
+import { User, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth'
 import { auth, googleProvider } from '../lib/firebase'
 
 interface AuthContextType {
@@ -9,10 +9,12 @@ interface AuthContextType {
   loading: boolean
   error: string | null
   signInWithGoogle: () => Promise<void>
+  signInWithEmail: (email: string, password: string) => Promise<void>
+  signUpWithEmail: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
 }
 
-const AuthContext = createContext<AuthContextType>({} as AuthContextType)
+const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export const useAuth = () => {
   const context = useContext(AuthContext)
@@ -28,14 +30,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!auth) {
+      console.error('Firebase auth not initialized')
+      setLoading(false)
+      return
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user)
+      setLoading(false)
+    }, (error) => {
+      console.error('Auth state change error:', error)
+      setError(error.message)
       setLoading(false)
     })
     return () => unsubscribe()
   }, [])
 
   const signInWithGoogle = async () => {
+    if (!auth || !googleProvider) {
+      setError('Authentication not initialized')
+      return
+    }
+
     setError(null)
     setLoading(true)
     try {
@@ -45,15 +62,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('Sign-in error:', error)
       if (error.code === 'auth/popup-closed-by-user') {
         setError('Sign-in cancelled')
+      } else if (error.code === 'auth/popup-blocked') {
+        setError('Popup blocked by browser. Please allow popups and try again.')
       } else {
-        setError('Failed to sign in')
+        setError(error.message || 'Failed to sign in with Google')
       }
     } finally {
       setLoading(false)
     }
   }
 
+  const signInWithEmail = async (email: string, password: string) => {
+    if (!auth) {
+      setError('Authentication not initialized')
+      return
+    }
+
+    setError(null)
+    setLoading(true)
+    try {
+      const result = await signInWithEmailAndPassword(auth, email, password)
+      setUser(result.user)
+    } catch (error: any) {
+      console.error('Email sign-in error:', error)
+      setError(error.message || 'Failed to sign in with email')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const signUpWithEmail = async (email: string, password: string) => {
+    if (!auth) {
+      setError('Authentication not initialized')
+      return
+    }
+
+    setError(null)
+    setLoading(true)
+    try {
+      const result = await createUserWithEmailAndPassword(auth, email, password)
+      setUser(result.user)
+    } catch (error: any) {
+      console.error('Email sign-up error:', error)
+      setError(error.message || 'Failed to create account')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const logout = async () => {
+    if (!auth) {
+      setError('Authentication not initialized')
+      return
+    }
+
     setError(null)
     try {
       await signOut(auth)
@@ -65,7 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, signInWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, loading, error, signInWithGoogle, signInWithEmail, signUpWithEmail, logout }}>
       {children}
     </AuthContext.Provider>
   )

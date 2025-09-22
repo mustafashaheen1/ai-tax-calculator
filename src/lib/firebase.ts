@@ -1,7 +1,7 @@
 'use client';
 
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // Temporarily disable Firebase to prevent invalid API key errors
@@ -27,6 +27,9 @@ if (process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+// Export auth functions
+export { createUserWithEmailAndPassword, signInWithEmailAndPassword };
+
     googleProvider = new GoogleAuthProvider();
     
     // Set the OAuth client ID for Google Sign In
