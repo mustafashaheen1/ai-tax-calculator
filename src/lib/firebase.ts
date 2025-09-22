@@ -27,8 +27,6 @@ if (process.env.NEXT_PUBLIC_FIREBASE_API_KEY) {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
-// Export auth functions
-export { createUserWithEmailAndPassword, signInWithEmailAndPassword };
 
     googleProvider = new GoogleAuthProvider();
     
